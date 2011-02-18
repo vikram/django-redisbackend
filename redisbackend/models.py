@@ -59,12 +59,13 @@ class RedisModel(models.Model):
                 try:
                     field = self._meta.get_field(name)
                     if type(field) == models.fields.DateTimeField:
-                        keys.append(RedisKeyAttribute(name=name, key=name.upper(), formatter=lower_str, extracter=lambda obj: getattr(obj, name).strftime('%Y%m%d%H%M')))
+                        keys.append(RedisKeyAttribute(name=name, key=name.upper(), formatter=lower_str))
+                        #, extracter=lambda obj: getattr(obj, name).strftime('%Y%m%d%H%M')))
                     else:
-                        keys.append(RedisKeyAttribute(name=name, key=name.upper(), formatter=lower_str, extracter=lambda obj: getattr(obj, name)))
+                        keys.append(RedisKeyAttribute(name=name, key=name.upper(), formatter=lower_str))
                 except models.FieldDoesNotExist:
                     if hasattr(self, name):
-                       keys.append(RedisKeyAttribute(name=name, key=name.upper(), formatter=lower_str, extracter=lambda obj: getattr(obj, name), list_based=True)) 
+                       keys.append(RedisKeyAttribute(name=name, key=name.upper(), formatter=lower_str, list_based=True)) 
         key_maker = KeyMaker(base=self._meta.db_table, keys=keys) 
         return key_maker
 
