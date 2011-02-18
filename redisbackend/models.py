@@ -70,16 +70,18 @@ class RedisQuerySet(object):
         self._doneresults = False
         self.current = 0
         self.high = 0
+        self.query = self._keymaker.buildkey({})
 
     def all(self):
-        self.query = self._keymaker.buildkey({})
         self._doneresults = False
-        return self.results()
+        self.results()
+        return self
 
     def filter(self, **kwargs):
         self._doneresults = False
         self.query = self._keymaker.buildkey(kwargs)
-        return self.results()
+        self.results()
+        return self
 
     def results(self):
         if not self._doneresults:
@@ -87,11 +89,29 @@ class RedisQuerySet(object):
             res = redis_connection().keys(self.query)
             self._doneresults = True
             self.setresults(res)
-        return [EventRedis(x) for x in self._results]
 
     def setresults(self, newres):
         self._results = newres
         self.high = len(newres)
+
+    def __getitem__(self,index):
+        return self._results[index]
+
+    def __iter__(self):
+        return self
+
+    def count(self):
+        if not self._doneresults: self.results()
+        return len(self._results)
+
+    def next(self):
+        self.high = len(self._results)
+        if self.current >= self.high:
+            raise StopIteration
+        else:
+            self.current += 1
+            return self._results[self.current - 1]
+
 """
 
     def groupby(self, key):
@@ -128,23 +148,6 @@ class RedisQuerySet(object):
         newres = list(set(res).intersection(set(keys)))
         self.setresults(newres)
         return self
-
-    def __iter__(self):
-        return self
-
-    def next(self):
-        self.high = len(self.results())
-        if self.current >= self.high:
-            raise StopIteration
-        else:
-            self.current += 1
-            return self.results()[self.current - 1]
-
-    def count(self):
-        return len(self.results())
-
-    def __getitem__(self,index):
-        return self.results()[index]
 
 
         #int(contents[c.key][-1].epoch()))
