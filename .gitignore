@@ -1,0 +1,4 @@
+*.pyc
+.DS_Store
+.*swp
+django_redisbackend.egg-info/
