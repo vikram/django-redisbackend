@@ -44,12 +44,15 @@ class RedisModel(models.Model):
         super(RedisModel, self).__init__(*args, **kwargs)
 
     def cached_attributes(self):
-        return {}
+        dict = {}
+        fields = self._meta.get_all_field_names()
+        for key, value in self.__dict__.items():
+            if key in fields:
+                dict[key] = value
+        return dict
 
     def expires(self):
         return None
-
-
 
     def cache(self):
         key = self.makekey()
@@ -59,25 +62,28 @@ class RedisModel(models.Model):
         expires = self.expires()
         if expires: r.expireat(key, expires)
 
-
 class RedisQuerySet(object):
-    def __init__(self, model, **kwargs):
-        self._redis_fields = kwargs.pop("redis_fields", [])
-        self._redis_ordering = kwargs.pop("redis_ordering", '')
-        self._redis_base = kwargs.pop("redis_base", '')
-        self._keymaker = key_maker(self._redis_base, self._redis_fields)
+    def __init__(self, model, keymaker):
+        self._model = model
+        self._keymaker = keymaker
         self._results = None
         self._doneresults = False
         self.current = 0
         self.high = 0
-        super(RedisQuerySet, self).__init__(*args, **kwargs)
 
-    def redis(self, **kwargs):
+    def all(self):
+        self.query = self._keymaker.buildkey({})
+        self._doneresults = False
+        return self.results()
+
+    def filter(self, **kwargs):
+        self._doneresults = False
         self.query = self._keymaker.buildkey(kwargs)
         return self.results()
 
     def results(self):
         if not self._doneresults:
+            print self.query
             res = redis_connection().keys(self.query)
             self._doneresults = True
             self.setresults(res)
