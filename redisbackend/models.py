@@ -1,5 +1,128 @@
 from base import redis_connection, dump, load, key_maker
+from api import identity, lower_str, RedisKeyAttribute, date_str
 from django.db import models
+
+def partition(iterable, func):
+    result = {}
+    for i in iterable:
+        j = func(i)
+        if type(j) == type([]):
+            for k in j:
+                result.setdefault(k, []).append(i)
+        else:
+            result.setdefault(func(i), []).append(i)
+    return result
+
+def or_fn(res, asc_value, l, o):
+    try:
+        if asc_value:
+            return res.index(o)
+        else:
+            return l - res.index(o)
+    except ValueError:
+        #print o
+        pass
+
+class RedisQuerySet(object):
+    def __init__(self, model, keymaker, ordering_key):
+        self._model = model
+        self._redis_ordering_key = ordering_key
+        self._keymaker = keymaker
+        self.asc = True
+        self.clear()
+        self.query = self._keymaker.buildkey({})
+
+    def deleteall(self):
+        r = redis_connection()
+        r.delete(self.redis_ordering_key)
+        for key in self.all():
+            r.delete(key)
+        self.clear()
+
+    def clear(self):
+        self._doneresults = False
+        self.current = 0
+        self.high = 0
+        self._results = None
+
+    def all(self):
+        self._doneresults = False
+        self.results()
+        return self
+
+    def filter(self, **kwargs):
+        self._doneresults = False
+        self.query = self._keymaker.buildkey(kwargs)
+        self.results()
+        return self
+
+    def group_by(self, key):
+        self._doneresults = False
+        self.results()
+        results = dict(partition(self, lambda e:getattr(e, key)).items())
+        #for keyvalue, show_keys in results.items():
+        #    show_keys.sort(key=lambda e: e.time)
+        return results
+
+    def reverse(self):
+        self.asc = not self.asc
+        return self
+
+    def after(self, val):
+        keys = redis_connection().zrangebyscore(self._redis_ordering_key, val, '+inf')
+        self.intersect(keys)
+        return self
+
+    def before(self, val):
+        keys = redis_connection().zrangebyscore(self._redis_ordering_key, '-inf', val)
+        self.intersect(keys)
+        return self
+
+    def intersect(self, keys):
+        self.results()
+        res = self._results
+        newres = list(set(res).intersection(set(keys)))
+        self.setresults(newres)
+        return self
+
+    def results(self):
+        if not self._doneresults:
+            self.clear()
+            res = redis_connection().keys(self.query)
+            if self._redis_ordering_key:
+                ordered_results = redis_connection().zrangebyscore(self._redis_ordering_key, '-inf', '+inf')
+                res.sort(key = lambda o: or_fn(ordered_results, self.asc, len(res), o))
+            self._doneresults = True
+            self.setresults(res)
+
+    def setresults(self, newres):
+        self._results = newres
+        self.high = len(newres)
+
+    def __getitem__(self,index):
+        return self._makeobj(self._results[index])
+
+    def __iter__(self):
+        return self
+
+    def count(self):
+        if not self._doneresults: self.results()
+        return len(self._results)
+
+    def next(self):
+        self.high = len(self._results)
+        if self.current >= self.high:
+            raise StopIteration
+        else:
+            self.current += 1
+            return self._makeobj(self._results[self.current - 1])
+
+    def _makeobj(self, key):
+        obj = self._model()
+        r = redis_connection()
+        res = r.get(key)
+        if res: obj.__dict__.update( load(res))
+        return obj
 
 class RedisManager(object):
     """
@@ -12,9 +135,14 @@ class RedisManager(object):
         self._ordering = ordering
         self._model = model
         self._keymaker = key_maker(base, fields, model)
+        self._redis_ordering_key = None
+        self._redis_ordering_fn = None
+        if ordering != '': 
+            self._redis_ordering_key = self._base + ':' + self._ordering.name
+            self._redis_ordering_fn = lambda obj: self._ordering.extracter(obj)
 
     def get_query_set(self):
-        return RedisQuerySet(self._model, keymaker=self._keymaker)
+        return RedisQuerySet(self._model, keymaker=self._keymaker, ordering_key=self._redis_ordering_key)
 
     def __getattr__(self, attr, *args):
         return getattr(self.get_query_set(), attr, *args)
@@ -33,6 +161,8 @@ class RedisModelBase(models.base.ModelBase):
             ordering = my_dict.get('_redis_ordering', '')
             new_class.redis = RedisManager(base, fields, ordering, new_class)
             new_class.makekey = lambda a: new_class.redis._keymaker.buildkey(a, any=False)
+            new_class.redis_ordering_key = new_class.redis._redis_ordering_key
+            new_class.redis_ordering_fn = new_class.redis._redis_ordering_fn
         return new_class
 
 class RedisModel(models.Model):
@@ -46,10 +176,20 @@ class RedisModel(models.Model):
     def cached_attributes(self):
         dict = {}
         fields = self._meta.get_all_field_names()
-        for key, value in self.__dict__.items():
-            if key in fields:
-                dict[key] = value
+        for field_name in fields:
+            try:
+                field = self._meta.get_field(field_name)
+                if self.__dict__.has_key(field.attname):
+                    dict[field.attname] = self.__dict__[field.attname]
+            except models.FieldDoesNotExist, e:
+                pass
         return dict
+
+    def redis_ordering_value(self):
+        if self.redis_ordering_fn:
+            return self.redis_ordering_fn()
+        else:
+            None
 
     def expires(self):
         return None
@@ -61,118 +201,6 @@ class RedisModel(models.Model):
         r.set(key, dump(attrs))
         expires = self.expires()
         if expires: r.expireat(key, expires)
-
-class RedisQuerySet(object):
-    def __init__(self, model, keymaker):
-        self._model = model
-        self._keymaker = keymaker
-        self._results = None
-        self._doneresults = False
-        self.current = 0
-        self.high = 0
-        self.query = self._keymaker.buildkey({})
-
-    def all(self):
-        self._doneresults = False
-        self.results()
-        return self
-
-    def filter(self, **kwargs):
-        self._doneresults = False
-        self.query = self._keymaker.buildkey(kwargs)
-        self.results()
-        return self
-
-    def results(self):
-        if not self._doneresults:
-            print self.query
-            res = redis_connection().keys(self.query)
-            self._doneresults = True
-            self.setresults(res)
-
-    def setresults(self, newres):
-        self._results = newres
-        self.high = len(newres)
-
-    def __getitem__(self,index):
-        return self._results[index]
-
-    def __iter__(self):
-        return self
-
-    def count(self):
-        if not self._doneresults: self.results()
-        return len(self._results)
-
-    def next(self):
-        self.high = len(self._results)
-        if self.current >= self.high:
-            raise StopIteration
-        else:
-            self.current += 1
-            return self._results[self.current - 1]
-
-"""
-
-    def groupby(self, key):
-        results = dict(partition(self.results(), lambda e:getattr(e, key)).items())
-        for keyvalue, show_keys in results.items():
-            show_keys.sort(key=lambda e: e.datetime)
-        return results
-
-    def distinct(self, key):
-        return self.groupby(key).keys()
-
-    def after(self, date):
-        epoch = int(time.mktime(date.timetuple()))
-        keys = redis_connection().zrangebyscore('cms:timedevents', epoch, '+inf')
-        self.intersect(keys)
-        return self
-
-    def before(self, date):
-        epoch = int(time.mktime(date.timetuple()))
-        keys = redis_connection().zrangebyscore('cms:timedevents', '-inf', epoch)
-        self.intersect(keys)
-        return self
-
-    def intersect(self, keys):
-        res = self.results()
-        newres = list(set(res).intersection(set(keys)))
-        self.setresults(newres)
-        return self
-
-    def filter(self, **kwargs):
-        query = event_key_maker.buildkey(kwargs)
-        res = self.results()
-        keys = redis_connection().keys(query)
-        newres = list(set(res).intersection(set(keys)))
-        self.setresults(newres)
-        return self
+        if self.redis_ordering_key: r.zadd(self.redis_ordering_key, key, self.redis_ordering_value())
 
 
-        #int(contents[c.key][-1].epoch()))
-
-class EventRedis(object):
-    def __init__(self, key):
-        self.key = key
-
-    def __getattr__(self, attr):
-        if attr == 'datetime':
-            return int('%s%s%s%s%s' % (self.year, self.month, self.day, self.hour, self.minute))
-        else:
-            return event_key_maker.extractelement(self.key, attr)
-
-    def attributes(self):
-        r = redis_connection()
-        event = r.get(self.key)
-        if event: return load(event)
-
-    def __repr__(self):
-        return 'EventRedis:' + self.key
-
-    def epoch(self):
-        return time.mktime((int(self.year), int(self.month), int(self.day), int(self.hour), int(self.minute), 0, 0, 0, -1))
-
-
-
-"""
