@@ -1,5 +1,5 @@
 identity = lambda a: str(a)
-lower_str = lambda a: str(a).lower()
+lower_str = lambda a: unicode(a).lower()
 date_str = lambda a: a.strftime('%Y%m%d%H%M')
 
 class RedisKeyAttribute(object):

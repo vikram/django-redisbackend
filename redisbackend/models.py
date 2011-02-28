@@ -1,6 +1,7 @@
 from base import redis_connection, dump, load, key_maker
 from api import identity, lower_str, RedisKeyAttribute, date_str
 from django.db import models
+from filter import field_converter
 
 def partition(iterable, func):
     result = {}
@@ -52,16 +53,20 @@ class RedisQuerySet(object):
 
     def filter(self, **kwargs):
         self._doneresults = False
-        self.query = self._keymaker.buildkey(kwargs)
+        dict = {}
+        for key, value in kwargs.items():
+            k, fn = field_converter(key)
+            dict[k] = fn(value) 
+        self.query = self._keymaker.buildkey(dict)
         self.results()
         return self
 
     def group_by(self, key):
         self._doneresults = False
         self.results()
-        results = dict(partition(self, lambda e:getattr(e, key)).items())
-        #for keyvalue, show_keys in results.items():
-        #    show_keys.sort(key=lambda e: e.time)
+        k, fn = field_converter(key)
+        results = dict(partition(self, lambda e: fn(getattr(e, k))).items())
+        self._doneresults = False
         return results
 
     def reverse(self):
@@ -104,6 +109,9 @@ class RedisQuerySet(object):
 
     def __iter__(self):
         return self
+
+    def __len__(self):
+        return self.count()
 
     def count(self):
         if not self._doneresults: self.results()
