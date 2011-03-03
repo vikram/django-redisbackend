@@ -32,6 +32,12 @@ class RedisQuerySet(object):
         self.asc = True
         self.clear()
         self.query = self._keymaker.buildkey({})
+        self.all()
+
+    def cacheall(self, objects=None):
+        self.clear()
+        if not objects: objects = self._model.objects
+        for o in objects.all(): o.cache()
 
     def deleteall(self):
         r = redis_connection()
@@ -52,6 +58,10 @@ class RedisQuerySet(object):
         return self
 
     def filter(self, **kwargs):
+        if self._doneresults:
+            keys = self._results
+        else:
+            keys = []
         self._doneresults = False
         dict = {}
         for key, value in kwargs.items():
@@ -59,6 +69,51 @@ class RedisQuerySet(object):
             dict[k] = fn(value) 
         self.query = self._keymaker.buildkey(dict)
         self.results()
+        self.intersect(keys)
+        return self
+
+    def filter_or(self, **kwargs):
+        if self._doneresults:
+            keys = self._results
+        else:
+            keys = []
+        self._doneresults = False
+        dict = {}
+        for key, value in kwargs.items():
+            k, fn = field_converter(key)
+            dict[k] = fn(value) 
+        self.query = self._keymaker.buildkey(dict)
+        self.results()
+        self.union(keys)
+        return self
+
+    def union(self, keys):
+        self.results()
+        res = self._results
+        newres = list(set(keys).union(set(res)))
+        self.setresults(newres)
+        return self
+
+    def exclude(self, **kwargs):
+        if self._doneresults:
+            keys = self._results
+        else:
+            keys = []
+        self._doneresults = False
+        dict = {}
+        for key, value in kwargs.items():
+            k, fn = field_converter(key)
+            dict[k] = fn(value) 
+        self.query = self._keymaker.buildkey(dict)
+        self.results()
+        self.diffs(keys)
+        return self
+
+    def diffs(self, keys):
+        self.results()
+        res = self._results
+        newres = list(set(keys).difference(set(res)))
+        self.setresults(newres)
         return self
 
     def group_by(self, key):
