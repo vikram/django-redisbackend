@@ -79,22 +79,17 @@ class KeyBuilder(object):
 
     def extractelement(self, key, bit):
         found = False
-        for lst, simple in [(self.simple, True), (self.lists, False)]:
-            for attr, attr_key, formatter in lst:
-                if bit == attr:
-                    found = True
-                    break
+        for key_bit in self.keys:
+            if key_bit.name == bit:
+                found = True
+                break
             if found: break
 
         if not found: return None
 
-        i = key.split(self.demarker).index(attr_key) + 1
+        i = key.split(self.demarker).index(key_bit.key) + 1
         value = key.split(self.demarker)[i]
-        if simple:
-            return value
-        else:
-            return [val for val in value.split(self.list_demarker) if val]
-
+        return value
 
 def key_maker(base, redis_fields, model):
     keys = []

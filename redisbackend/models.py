@@ -119,8 +119,8 @@ class RedisQuerySet(object):
     def group_by(self, key):
         self._doneresults = False
         self.results()
-        k, fn = field_converter(key)
-        results = dict(partition(self, lambda e: fn(getattr(e, k))).items())
+        keys = self._results
+        results = partition(keys, lambda k: self._keymaker.extractelement(k, key))
         self._doneresults = False
         return results
 
