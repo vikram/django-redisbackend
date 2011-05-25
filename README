@@ -1,0 +1,30 @@
+Pushes the objects into Redis and makes them searchable.
+
+The idea is that you don't just have a simple key (id) value store.
+The key will hold the join information in it, as the Redis keys command
+lets you search keys using wildcards.
+
+So we generate keys, by looking at the Model information, you have to mark
+certain attributes as keys. Then the key is generated for each instance and
+the object dict is pushed into redis.
+
+I've tried to provide, filter, get, etc. Similar to what the django resultset
+might have. The Model definition is not very refined. So more work is needed
+on that.
+
+class Vehicle(RedisModel):
+    binnumber = models.CharField(max_length=250, default='', db_index=True, unique=True)
+    make = models.ForeignKey(Manufacturer)
+    model = models.CharField(max_length=250, default='', db_index=True, null=True, blank=True)
+    color = models.CharField(max_length=250, default='', db_index=True, null=True, blank=True)
+    madeon = models.DateTimeField(db_index=True)
+    plant = models.ForeignKey(Plant)
+
+    _redis_base = 'Vehicle'
+    _redis_fields = ('binnumber','model','color','madeon')
+    _redis_fields = ( RedisKeyAttribute(name='binnumber',key='B'),
+                      RedisKeyAttribute(name='model',key='M'),
+                      RedisKeyAttribute(name='color',key='C'),
+                      RedisKeyAttribute(name='madeon',key='D', lambda v: v.madeon.strftime('%d:M:%m:Y:%Y:h:%H:m:%M')),
+                      RedisKeyAttribute(name='plant',key='P', lambda v: v.plant.key),
+                      RedisKeyAttribute(name='make',key='N', lambda v: v.make.key))
