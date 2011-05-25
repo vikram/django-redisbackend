@@ -28,3 +28,15 @@ class Vehicle(RedisModel):
                       RedisKeyAttribute(name='madeon',key='D', lambda v: v.madeon.strftime('%d:M:%m:Y:%Y:h:%H:m:%M')),
                       RedisKeyAttribute(name='plant',key='P', lambda v: v.plant.key),
                       RedisKeyAttribute(name='make',key='N', lambda v: v.make.key))
+
+
+Now you should be able to do things like
+
+To load everything
+Vehicle.redis.clear()
+for vehicle in Vehicle.objects.all():
+    vehicle.cache()
+
+Now....
+
+Vehicle.redis.all()

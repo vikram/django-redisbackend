@@ -16,7 +16,8 @@ re_date=re.compile('^new\sDate\(Date\.UTC\(.*?\)\)')
 def dateDecoder(json,idx):
     json=json[idx:]
     m=re_date.match(json)
-    if not m: raise 'cannot parse JSON string as Date object: %s'%json[idx:]
+    if not m: 
+        raise 'cannot parse JSON string as Date object: %s'%json[idx:]
     args=cjson.decode('[%s]'%json[18:m.end()-2])
     dt=datetime(*args)
     return (dt,m.end()) # must return (object, character_count) tuple
@@ -50,7 +51,7 @@ class KeyBuilder(object):
         for key_bit in self.keys:
             if not key_bit.list_based:
                 key += key_bit.key + self.demarker
-                if type(obj) != type({}):
+                if not isinstance(obj, dict):
                     key += key_bit.formatter(key_bit.extracter(obj))
                 elif obj.has_key(key_bit.name):
                     key += key_bit.formatter(obj[key_bit.name])
@@ -59,18 +60,22 @@ class KeyBuilder(object):
                 key += self.demarker
             else:
                 key += key_bit.key + self.demarker
-                if type(obj) != type({}):
-                    if any: key += self.any
+                if not isinstance(obj, dict):
+                    if any: 
+                        key += self.any
                     values = key_bit.extracter(obj)
                     for value in values:
                         key += self.list_demarker + key_bit.formatter(value) + self.list_demarker
-                    if any: key += self.any
+                    if any: 
+                        key += self.any
                 elif obj.has_key(key_bit.name):
-                    if any: key += self.any
+                    if any: 
+                        key += self.any
                     values = obj[key_bit.name]
                     for value in values:
                         key += self.list_demarker + key_bit.formatter(value) + self.list_demarker
-                    if any: key += self.any
+                    if any: 
+                        key += self.any
                 elif any:
                     key += self.any
                 key += self.demarker
